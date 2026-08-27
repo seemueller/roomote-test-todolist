@@ -61,13 +61,16 @@ export function CustomTitleBar() {
   useEffect(() => {
     const tauri = isTauri();
     setIsTauriEnv(tauri);
+    console.log("Titlebar: Tauri detected", tauri);
     if (!tauri) return;
 
     let cleanup: (() => void) | undefined;
 
     loadTauriWindow()
       .then((win) => {
+        console.log("Titlebar: window acquired");
         return win.isMaximized().then((max) => {
+          console.log("Titlebar: isMaximized", max);
           setIsMaximized(max);
           return win.listen("tauri://resize", () => {
             win.isMaximized().then(setIsMaximized).catch(() => {});
@@ -75,9 +78,12 @@ export function CustomTitleBar() {
         });
       })
       .then((unlisten) => {
+        console.log("Titlebar: resize listener attached");
         cleanup = unlisten;
       })
-      .catch(() => {});
+      .catch((e) => {
+        console.error("Titlebar: setup failed", e);
+      });
 
     return () => {
       cleanup?.();
@@ -97,34 +103,40 @@ export function CustomTitleBar() {
 
   async function handleMinimize() {
     try {
+      console.log("Titlebar: minimize clicked");
       const win = await loadTauriWindow();
       await win.minimize();
+      console.log("Titlebar: minimized");
     } catch (e) {
-      console.error("Minimize failed:", e);
+      console.error("Titlebar: minimize failed", e);
     }
   }
 
   async function handleMaximize() {
     try {
+      console.log("Titlebar: maximize clicked");
       const win = await loadTauriWindow();
       const maximized = await win.isMaximized();
       if (maximized) {
         await win.unmaximize();
+        console.log("Titlebar: unmaximized");
       } else {
         await win.maximize();
+        console.log("Titlebar: maximized");
       }
       setIsMaximized((m) => !m);
     } catch (e) {
-      console.error("Maximize failed:", e);
+      console.error("Titlebar: maximize failed", e);
     }
   }
 
   async function handleClose() {
     try {
+      console.log("Titlebar: close clicked");
       const win = await loadTauriWindow();
       await win.close();
     } catch (e) {
-      console.error("Close failed:", e);
+      console.error("Titlebar: close failed", e);
     }
   }
 
