@@ -92,6 +92,7 @@ a:hover {
   z-index: 50;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-app-region: drag;
 }
 
 .titlebar-left {
