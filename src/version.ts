@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.4.0";
+export const APP_VERSION = "0.5.2";
 
 export interface ChangelogEntry {
   version: string;
@@ -7,6 +7,25 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.5.2",
+    date: "2026-08-27",
+    changes: [
+      "Titelleiste unter Windows repariert: Fenster ziehen, minimieren, maximieren und schließen funktionieren",
+      "Debug-Log-Panel (Ctrl+Shift+L) für Fehlerdiagnose",
+    ],
+  },
+  {
+    version: "0.5.0",
+    date: "2026-08-26",
+    changes: [
+      "In-App-Update-Mechanismus über GitHub Releases",
+      "Deutsche Sprache für Windows-Installer",
+      "Explizite 64-Bit-Targets für Windows-Bundles",
+      "Tauri v2 Bundle-Konfiguration",
+      "Eigene Titelleiste mit Fenstersteuerung wiederhergestellt",
+    ],
+  },
   {
     version: "0.4.0",
     date: "2026-08-25",
