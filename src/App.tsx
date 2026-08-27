@@ -762,6 +762,14 @@ function App() {
           <span className="version">v{APP_VERSION}</span>
           <button
             type="button"
+            className="debug-btn"
+            onClick={() => setShowDebug(true)}
+            aria-label="Debug Logs"
+          >
+            Debug
+          </button>
+          <button
+            type="button"
             className="changelog-btn"
             onClick={() => setShowChangelog(true)}
           >
