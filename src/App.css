@@ -799,7 +799,8 @@ a:hover {
   color: var(--ink-ghost);
 }
 
-.changelog-btn {
+.changelog-btn,
+.debug-btn {
   padding: 0 0 2px;
   border: none;
   border-bottom: var(--border-thin);
@@ -814,7 +815,8 @@ a:hover {
   cursor: pointer;
 }
 
-.changelog-btn:hover {
+.changelog-btn:hover,
+.debug-btn:hover {
   background: var(--highlight);
 }
 
