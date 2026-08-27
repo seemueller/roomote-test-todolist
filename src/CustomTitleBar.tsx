@@ -43,11 +43,10 @@ function CloseIcon() {
 }
 
 function isTauri(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    ((window as any).__TAURI_INTERNALS__ !== undefined ||
-      (window as any).__TAURI__ !== undefined)
-  );
+  const w = window as any;
+  if (typeof w === "undefined") return false;
+  if (w.__TAURI_INTERNALS__?.invoke) return true;
+  return /Tauri/i.test(navigator.userAgent);
 }
 
 async function loadTauriWindow() {
@@ -62,24 +61,27 @@ export function CustomTitleBar() {
   useEffect(() => {
     const tauri = isTauri();
     setIsTauriEnv(tauri);
-    if (tauri) {
-      loadTauriWindow().then((win) => {
-        win.isMaximized().then(setIsMaximized);
+    if (!tauri) return;
 
-        const unlistenPayload = win.listen("tauri://resize", () => {
-          win.isMaximized().then(setIsMaximized).catch(() => {});
+    let cleanup: (() => void) | undefined;
+
+    loadTauriWindow()
+      .then((win) => {
+        return win.isMaximized().then((max) => {
+          setIsMaximized(max);
+          return win.listen("tauri://resize", () => {
+            win.isMaximized().then(setIsMaximized).catch(() => {});
+          });
         });
+      })
+      .then((unlisten) => {
+        cleanup = unlisten;
+      })
+      .catch(() => {});
 
-        const unlistenClose = win.listen("tauri://close-requested", () => {
-          // no-op, just subscribed to keep the listener alive
-        });
-
-        return () => {
-          unlistenPayload.then((fn) => fn());
-          unlistenClose.then((fn) => fn());
-        };
-      }).catch(() => {});
-    }
+    return () => {
+      cleanup?.();
+    };
   }, []);
 
   if (!isTauriEnv) {
@@ -94,24 +96,36 @@ export function CustomTitleBar() {
   }
 
   async function handleMinimize() {
-    const win = await loadTauriWindow();
-    await win.minimize();
+    try {
+      const win = await loadTauriWindow();
+      await win.minimize();
+    } catch (e) {
+      console.error("Minimize failed:", e);
+    }
   }
 
   async function handleMaximize() {
-    const win = await loadTauriWindow();
-    const maximized = await win.isMaximized();
-    if (maximized) {
-      await win.unmaximize();
-    } else {
-      await win.maximize();
+    try {
+      const win = await loadTauriWindow();
+      const maximized = await win.isMaximized();
+      if (maximized) {
+        await win.unmaximize();
+      } else {
+        await win.maximize();
+      }
+      setIsMaximized((m) => !m);
+    } catch (e) {
+      console.error("Maximize failed:", e);
     }
-    setIsMaximized(!maximized);
   }
 
   async function handleClose() {
-    const win = await loadTauriWindow();
-    await win.close();
+    try {
+      const win = await loadTauriWindow();
+      await win.close();
+    } catch (e) {
+      console.error("Close failed:", e);
+    }
   }
 
   return (
@@ -120,7 +134,7 @@ export function CustomTitleBar() {
         <AppIcon />
         <span className="titlebar-title">TodoList</span>
       </div>
-      <div className="titlebar-controls" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+      <div className="titlebar-controls">
         <button className="titlebar-btn minimize" onClick={handleMinimize} aria-label="Minimieren">
           <MinimizeIcon />
         </button>
