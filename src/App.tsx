@@ -15,11 +15,9 @@ import {
   updateTodoStatus,
   updateTodoTitle,
 } from "./db";
-import { installDebugInterceptor } from "./debug";
 import { CATEGORY_COLORS, Category, Priority, Todo, TodoStatus } from "./types";
 import { APP_VERSION, CHANGELOG } from "./version";
 import { CustomTitleBar } from "./CustomTitleBar";
-import { DebugLogPanel } from "./DebugLogPanel";
 import {
   BoardViewIcon,
   CategoryBadge,
@@ -135,7 +133,13 @@ function App() {
 
   // Debug log panel (Ctrl+Shift+L)
   const [showDebug, setShowDebug] = useState(false);
+  const [DebugLogPanel, setDebugLogPanel] = useState<React.ComponentType<{ onClose: () => void }> | null>(null);
   const closeDebug = useCallback(() => setShowDebug(false), []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    import("./DebugLogPanel").then((mod) => setDebugLogPanel(() => mod.DebugLogPanel));
+  }, []);
 
   async function refresh() {
     try {
@@ -158,10 +162,12 @@ function App() {
   }, []);
 
   useEffect(() => {
-    installDebugInterceptor();
+    if (!import.meta.env.DEV) return;
+    import("./debug").then((mod) => mod.installDebugInterceptor());
   }, []);
 
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
     function handleKey(e: KeyboardEvent) {
       if (e.ctrlKey && e.shiftKey && e.key === "L") {
         e.preventDefault();
@@ -801,14 +807,16 @@ function App() {
             {checkingUpdate ? "Prüfe..." : "Update"}
           </button>
           <span className="version">v{APP_VERSION}</span>
-          <button
-            type="button"
-            className="debug-btn"
-            onClick={() => setShowDebug(true)}
-            aria-label="Debug Logs"
-          >
-            Debug
-          </button>
+          {import.meta.env.DEV && (
+            <button
+              type="button"
+              className="debug-btn"
+              onClick={() => setShowDebug(true)}
+              aria-label="Debug Logs"
+            >
+              Debug
+            </button>
+          )}
           <button
             type="button"
             className="changelog-btn"
@@ -953,7 +961,7 @@ function App() {
         </Modal>
       )}
 
-      {showDebug && <DebugLogPanel onClose={closeDebug} />}
+      {import.meta.env.DEV && showDebug && DebugLogPanel && <DebugLogPanel onClose={closeDebug} />}
     </div>
   );
 }
