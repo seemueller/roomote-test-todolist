@@ -30,6 +30,10 @@ vi.mock("./db", () => ({
   updateTodoDueDate: vi.fn(),
   updateTodoPriority: vi.fn(),
   updateTodoStatus: vi.fn(),
+  updateTodoCategory: vi.fn(),
+  addCategory: vi.fn(),
+  updateCategory: vi.fn(),
+  deleteCategory: vi.fn(),
 }));
 
 vi.mock("./version", () => ({

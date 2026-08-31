@@ -1,22 +1,6 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import { DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useState } from "react";
-import {
-  addTodo,
-  addCategory,
-  deleteCategory,
-  deleteTodo,
-  listCategories,
-  listTodos,
-  toggleTodoDone,
-  updateCategory,
-  updateTodoCategory,
-  updateTodoDueDate,
-  updateTodoPriority,
-  updateTodoStatus,
-  updateTodoTitle,
-} from "./db";
+import { KeyboardEvent, useCallback, useEffect, useState } from "react";
+import { listCategories, listTodos } from "./db";
 import { installDebugInterceptor } from "./debug";
-import { CATEGORY_COLORS, Category, Priority, Todo, TodoStatus } from "./types";
 import { APP_VERSION, CHANGELOG } from "./version";
 import { CustomTitleBar } from "./CustomTitleBar";
 import { DebugLogPanel } from "./DebugLogPanel";
@@ -31,9 +15,6 @@ import {
   FilterChip,
   IconButton,
   InlineEditInput,
-  LaneDoneIcon,
-  LaneProgressIcon,
-  LaneTodoIcon,
   ListViewIcon,
   Modal,
   PencilIcon,
@@ -43,30 +24,18 @@ import {
   TrashIcon,
   UpdateIcon,
 } from "./ui";
+import {
+  useTodos,
+  useCategories,
+  useFilters,
+  useKanban,
+  useUpdateCheck,
+  filterLabels,
+  isDueToday,
+  isOverdue,
+} from "./hooks";
+import type { DueDateFilter } from "./hooks";
 import "./App.css";
-
-type DueDateFilter = "all" | "today" | "overdue" | "upcoming" | "none";
-
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function isDueToday(dueDate: string | null): boolean {
-  if (!dueDate) return false;
-  return dueDate === todayStr();
-}
-
-function isOverdue(dueDate: string | null): boolean {
-  if (!dueDate) return false;
-  return dueDate < todayStr();
-}
-
-function isDueUpcoming(dueDate: string | null): boolean {
-  if (!dueDate) return false;
-  const today = todayStr();
-  return dueDate > today;
-}
 
 function formatDate(dueDate: string): string {
   const [y, m, d] = dueDate.split("-").map(Number);
@@ -84,58 +53,115 @@ function formatDate(dueDate: string): string {
   return `${d}.${m}.`;
 }
 
-const filterLabels: Record<DueDateFilter, string> = {
-  all: "Alle",
-  today: "Heute",
-  overdue: "Überfällig",
-  upcoming: "Künftig",
-  none: "Ohne Datum",
-};
-
 function App() {
-  const [todos, setTodos] = useState<Todo[]>([]);
-  const [newTitle, setNewTitle] = useState("");
-  const [newPriority, setNewPriority] = useState<Priority>("medium");
-  const [newDueDate, setNewDueDate] = useState("");
-  const [newCategoryId, setNewCategoryId] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editingTitle, setEditingTitle] = useState("");
-  const [editingDueDate, setEditingDueDate] = useState("");
-  const [burstId, setBurstId] = useState<number | null>(null);
-  const [showChangelog, setShowChangelog] = useState(false);
-  const [checkUpdate, setCheckUpdate] = useState(false);
-  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [installingUpdate, setInstallingUpdate] = useState(false);
-  // Rueckmeldung der Update-Pruefung: Fehler oder "kein Update". Ohne diese
-  // Anzeige laeuft der Knopf ins Leere, wenn der Endpunkt nicht erreichbar ist.
-  const [updateStatus, setUpdateStatus] = useState<{ kind: "info" | "error"; text: string } | null>(
-    null,
-  );
-  const [dueDateFilter, setDueDateFilter] = useState<DueDateFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "done">("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const todosHook = useTodos();
+  const {
+    todos,
+    setTodos,
+    newTitle,
+    setNewTitle,
+    newPriority,
+    setNewPriority,
+    newDueDate,
+    setNewDueDate,
+    newCategoryId,
+    setNewCategoryId,
+    error,
+    setError,
+    editingId,
+    setEditingId,
+    editingTitle,
+    setEditingTitle,
+    editingDueDate,
+    setEditingDueDate,
+    burstId,
+    refreshTodos,
+    handleAdd,
+    handleToggle,
+    handleDelete,
+    handlePriorityChange,
+    startEdit,
+    commitEdit,
+    handleUpdateTodoCategory,
+  } = todosHook;
 
-  // Category state
-  const [categories, setCategories] = useState<Category[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
-  const [showCategoryManager, setShowCategoryManager] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [newCategoryColor, setNewCategoryColor] = useState(CATEGORY_COLORS[0]);
-  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
-  const [editingCategoryName, setEditingCategoryName] = useState("");
-  const [editingCategoryColor, setEditingCategoryColor] = useState("");
 
-  // Kanban view state
-  const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
-  const [draggedTodoId, setDraggedTodoId] = useState<number | null>(null);
-  const [dragOverLane, setDragOverLane] = useState<TodoStatus | null>(null);
+  const categoriesHook = useCategories(
+    setTodos,
+    setError,
+    categoryFilter,
+    setCategoryFilter,
+  );
+  const {
+    categories,
+    showCategoryManager,
+    setShowCategoryManager,
+    newCategoryName,
+    setNewCategoryName,
+    newCategoryColor,
+    setNewCategoryColor,
+    editingCategoryId,
+    editingCategoryName,
+    setEditingCategoryName,
+    editingCategoryColor,
+    setEditingCategoryColor,
+    refreshCategories,
+    handleAddCategory,
+    startEditCategory,
+    commitEditCategory,
+    handleDeleteCategory,
+    closeCategoryManager,
+  } = categoriesHook;
+
+  const filtersHook = useFilters(todos, categoryFilter, setCategoryFilter);
+  const {
+    dueDateFilter,
+    setDueDateFilter,
+    statusFilter,
+    setStatusFilter,
+    searchQuery,
+    setSearchQuery,
+    filteredTodos,
+    hasActiveFilter,
+    clearFilters,
+  } = filtersHook;
+
+  const kanbanHook = useKanban(handleToggle, handleDelete, setTodos);
+  const {
+    viewMode,
+    draggedTodoId,
+    dragOverLane,
+    setDragOverLane,
+    kanbanLanes,
+    handleDragStart,
+    handleChildDragStart,
+    handleLaneDragOver,
+    handleLaneDragLeave,
+    handleLaneDrop,
+    toggleViewMode,
+  } = kanbanHook;
+
+  const updateHook = useUpdateCheck();
+  const {
+    showChangelog,
+    setShowChangelog,
+    closeChangelog,
+    updateAvailable,
+    setUpdateAvailable,
+    checkingUpdate,
+    installingUpdate,
+    updateStatus,
+    setUpdateStatus,
+    triggerCheckUpdate,
+    handleInstallUpdate,
+  } = updateHook;
 
   // Debug log panel (Ctrl+Shift+L)
   const [showDebug, setShowDebug] = useState(false);
   const closeDebug = useCallback(() => setShowDebug(false), []);
+
+  const [loading, setLoading] = useState(true);
 
   async function refresh() {
     try {
@@ -143,8 +169,8 @@ function App() {
         listTodos(),
         listCategories(),
       ]);
-      setTodos(items);
-      setCategories(cats);
+      refreshTodos(items);
+      refreshCategories(cats);
       setError(null);
     } catch (err) {
       setError(String(err));
@@ -172,283 +198,8 @@ function App() {
     return () => document.removeEventListener("keydown", handleKey as any);
   }, []);
 
-  const closeChangelog = useCallback(() => setShowChangelog(false), []);
-
-  useEffect(() => {
-    if (!checkUpdate) return;
-    setCheckingUpdate(true);
-    setUpdateStatus(null);
-    (async () => {
-      if (!isTauri()) {
-        setUpdateStatus({
-          kind: "info",
-          text: "Updates stehen nur in der installierten App zur Verfügung, nicht im Browser.",
-        });
-        setCheckingUpdate(false);
-        setCheckUpdate(false);
-        return;
-      }
-      try {
-        const result = await invoke<{ update_available: boolean; version?: string }>(
-          "check_for_update",
-        );
-        if (result.update_available && result.version) {
-          setUpdateAvailable(result.version);
-        } else {
-          setUpdateStatus({
-            kind: "info",
-            text: `Version ${APP_VERSION} ist aktuell. Kein Update verfügbar.`,
-          });
-        }
-      } catch (err) {
-        setUpdateStatus({ kind: "error", text: `Update-Prüfung fehlgeschlagen: ${String(err)}` });
-      } finally {
-        setCheckingUpdate(false);
-        setCheckUpdate(false);
-      }
-    })();
-  }, [checkUpdate]);
-
-  const handleInstallUpdate = useCallback(async () => {
-    setInstallingUpdate(true);
-    try {
-      await invoke("install_update");
-      setUpdateAvailable(null);
-      setUpdateStatus({
-        kind: "info",
-        text: "Update installiert. Die Anwendung startet neu, um die neue Version zu laden.",
-      });
-    } catch (err) {
-      setUpdateAvailable(null);
-      setUpdateStatus({ kind: "error", text: `Installation fehlgeschlagen: ${String(err)}` });
-    } finally {
-      setInstallingUpdate(false);
-    }
-  }, []);
-
-  async function handleAdd(e: FormEvent) {
-    e.preventDefault();
-    const title = newTitle.trim();
-    if (!title) return;
-    try {
-      const dueDate = newDueDate || null;
-      const todo = await addTodo(title, newPriority, dueDate, newCategoryId);
-      setTodos((prev) => [todo, ...prev]);
-      setNewTitle("");
-      setNewPriority("medium");
-      setNewDueDate("");
-      setNewCategoryId(null);
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  async function handleToggle(todo: Todo) {
-    if (!todo.done) {
-      setBurstId(todo.id);
-      setTimeout(() => setBurstId(null), 800);
-    }
-    try {
-      const updated = await toggleTodoDone(todo.id, !todo.done);
-      setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  async function handleDelete(id: number) {
-    try {
-      await deleteTodo(id);
-      setTodos((prev) => prev.filter((t) => t.id !== id));
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  async function handlePriorityChange(id: number, priority: Priority) {
-    try {
-      const updated = await updateTodoPriority(id, priority);
-      setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  function startEdit(todo: Todo) {
-    setEditingId(todo.id);
-    setEditingTitle(todo.title);
-    setEditingDueDate(todo.due_date || "");
-  }
-
-  async function commitEdit(id: number) {
-    const title = editingTitle.trim();
-    if (title) {
-      try {
-        const updated = await updateTodoTitle(id, title);
-        setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-        setError(null);
-      } catch (err) {
-        setError(String(err));
-      }
-    }
-    try {
-      const dueDate = editingDueDate || null;
-      const updated = await updateTodoDueDate(id, dueDate);
-      setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-    setEditingId(null);
-  }
-
-  async function handleUpdateTodoCategory(id: number, categoryId: number | null) {
-    try {
-      const updated = await updateTodoCategory(id, categoryId);
-      setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  // ── Kanban drag-and-drop ──────────────────────────────────────────────
-
-  const kanbanLanes: { status: TodoStatus; label: string; icon: ReactNode; color: string }[] = [
-    { status: "todo", label: "Zu tun", icon: <LaneTodoIcon />, color: "#7cc3f7" },
-    { status: "in_progress", label: "In Bearbeitung", icon: <LaneProgressIcon />, color: "#ffd43b" },
-    { status: "done", label: "Erledigt", icon: <LaneDoneIcon />, color: "#6fcf7f" },
-  ];
-
-  async function handleDropOnLane(todoId: number, targetStatus: TodoStatus) {
-    try {
-      const updated = await updateTodoStatus(todoId, targetStatus);
-      setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
-      if (targetStatus === "done") {
-        setBurstId(todoId);
-        setTimeout(() => setBurstId(null), 800);
-      }
-      setError(null);
-      console.log(`drag: Aufgabe ${todoId} nach "${targetStatus}" verschoben`);
-    } catch (err) {
-      console.error(`drag: Verschieben von Aufgabe ${todoId} fehlgeschlagen:`, String(err));
-      setError(String(err));
-    } finally {
-      setDraggedTodoId(null);
-      setDragOverLane(null);
-    }
-  }
-
-  function handleDragStart(e: DragEvent, todoId: number) {
-    setDraggedTodoId(todoId);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", String(todoId));
-    console.log(`drag: dragstart für Aufgabe ${todoId}`);
-  }
-
-  function handleChildDragStart(e: DragEvent) {
-    e.stopPropagation();
-  }
-
-  function handleLaneDragOver(e: DragEvent) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  }
-
-  function handleLaneDragLeave(e: DragEvent) {
-    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-    setDragOverLane(null);
-  }
-
-  function handleLaneDrop(e: DragEvent, targetStatus: TodoStatus) {
-    e.preventDefault();
-    const raw = e.dataTransfer.getData("text/plain");
-    const todoId = Number(raw);
-    console.log(`drag: drop auf "${targetStatus}", dataTransfer="${raw}"`);
-    if (todoId) {
-      handleDropOnLane(todoId, targetStatus);
-    } else {
-      console.warn(`drag: drop ohne verwertbare Aufgaben-ID (dataTransfer="${raw}")`);
-    }
-  }
-
-  // ── Category CRUD ──────────────────────────────────────────────────────
-
-  async function handleAddCategory(e: FormEvent) {
-    e.preventDefault();
-    const name = newCategoryName.trim();
-    if (!name) return;
-    try {
-      const cat = await addCategory(name, newCategoryColor);
-      setCategories((prev) => [...prev, cat].sort((a, b) => a.name.localeCompare(b.name)));
-      setNewCategoryName("");
-      setNewCategoryColor(CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length]);
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  function startEditCategory(cat: Category) {
-    setEditingCategoryId(cat.id);
-    setEditingCategoryName(cat.name);
-    setEditingCategoryColor(cat.color);
-  }
-
-  async function commitEditCategory(id: number) {
-    const name = editingCategoryName.trim();
-    if (!name) return;
-    try {
-      const updated = await updateCategory(id, name, editingCategoryColor);
-      setCategories((prev) =>
-        prev.map((c) => (c.id === updated.id ? updated : c)).sort((a, b) => a.name.localeCompare(b.name))
-      );
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-    setEditingCategoryId(null);
-  }
-
-  async function handleDeleteCategory(id: number) {
-    try {
-      await deleteCategory(id);
-      setCategories((prev) => prev.filter((c) => c.id !== id));
-      setTodos((prev) => prev.map((t) => (t.category_id === id ? { ...t, category_id: null, category_name: null, category_color: null } : t)));
-      if (categoryFilter === id) setCategoryFilter(null);
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  const closeCategoryManager = useCallback(() => {
-    setShowCategoryManager(false);
-    setEditingCategoryId(null);
-  }, []);
-
   const remaining = todos.filter((t) => !t.done).length;
   const headerCount = todos.length === 0 ? "Keine Aufgaben" : `${remaining} offen`;
-  const filteredTodos = todos.filter((todo) => {
-    if (dueDateFilter === "today" && !isDueToday(todo.due_date)) return false;
-    if (dueDateFilter === "overdue" && (!isOverdue(todo.due_date) || todo.done)) return false;
-    if (dueDateFilter === "upcoming" && !isDueUpcoming(todo.due_date)) return false;
-    if (dueDateFilter === "none" && todo.due_date) return false;
-    if (statusFilter === "open" && todo.done) return false;
-    if (statusFilter === "done" && !todo.done) return false;
-    if (categoryFilter !== null && todo.category_id !== categoryFilter) return false;
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      if (!todo.title.toLowerCase().includes(query)) return false;
-    }
-    return true;
-  });
-
-  const hasActiveFilter = dueDateFilter !== "all" || statusFilter !== "all" || searchQuery || categoryFilter !== null;
 
   return (
     <div className="app-shell">
@@ -461,7 +212,7 @@ function App() {
           <button
             type="button"
             className={`view-toggle ${viewMode === "kanban" ? "kanban-active" : ""}`}
-            onClick={() => setViewMode((v) => (v === "list" ? "kanban" : "list"))}
+            onClick={toggleViewMode}
             aria-label={viewMode === "list" ? "Zum Kanban-Brett wechseln" : "Zur Listenansicht wechseln"}
             title={viewMode === "list" ? "Kanban-Brett" : "Liste"}
           >
@@ -498,200 +249,195 @@ function App() {
         {viewMode === "list" && (
           <>
             <div className="filter-bar">
-          <div className="filter-row">
-            {(Object.keys(filterLabels) as DueDateFilter[]).map((key) => (
-              <FilterChip
-                key={key}
-                active={dueDateFilter === key}
-                onClick={() => setDueDateFilter(key)}
-              >
-                {filterLabels[key]}
-              </FilterChip>
-            ))}
-            <div className="status-filter">
-              <FilterChip variant="segment" active={statusFilter === "all"} onClick={() => setStatusFilter("all")}>
-                Alle
-              </FilterChip>
-              <FilterChip variant="segment" active={statusFilter === "open"} onClick={() => setStatusFilter("open")}>
-                Offen
-              </FilterChip>
-              <FilterChip variant="segment" active={statusFilter === "done"} onClick={() => setStatusFilter("done")}>
-                Erledigt
-              </FilterChip>
-            </div>
-          </div>
-          <div className="filter-row">
-            <input
-              type="text"
-              className="search-input"
-              placeholder="Suche..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.currentTarget.value)}
-            />
-            <CategorySelect
-              className="filter-select"
-              categories={categories}
-              value={categoryFilter}
-              onValueChange={setCategoryFilter}
-              placeholderLabel="Alle Kategorien"
-            />
-            <IconButton
-              variant="icon"
-              onClick={() => setShowCategoryManager(true)}
-              aria-label="Kategorien verwalten"
-            >
-              <TagIcon />
-              Kategorien
-            </IconButton>
-          </div>
-        </div>
-
-        {hasActiveFilter && (
-          <div className="active-filters">
-            <span className="filter-label">
-              {filterLabels[dueDateFilter]}
-              {statusFilter !== "all"
-                ? ` • ${statusFilter === "open" ? "Offen" : "Erledigt"}`
-                : ""}
-              {categoryFilter !== null
-                ? ` • ${categories.find((c) => c.id === categoryFilter)?.name || "Kategorie"}`
-                : ""}
-              {searchQuery ? ` • Suche: "${searchQuery}"` : ""}
-            </span>
-            <button
-              type="button"
-              className="clear-filters"
-              onClick={() => {
-                setDueDateFilter("all");
-                setStatusFilter("all");
-                setSearchQuery("");
-                setCategoryFilter(null);
-              }}
-            >
-              Zurücksetzen
-            </button>
-          </div>
-        )}
-        {error && <p className="error">Fehler: {error}</p>}
-        {loading && <p className="muted">Lade Aufgaben …</p>}
-
-        {!loading && todos.length === 0 && !error && (
-          <p className="muted">Noch keine Aufgaben. Lege deine erste an — Titel eintippen, Enter drücken.</p>
-        )}
-
-        {!loading && hasActiveFilter && filteredTodos.length === 0 && (
-          <p className="muted">Keine Aufgaben gefunden. Setz den Filter auf „Alle“ zurück.</p>
-        )}
-
-        <ul className="todo-list">
-          {filteredTodos.map((todo) => {
-            const overdue = !todo.done && isOverdue(todo.due_date);
-            const today = isDueToday(todo.due_date);
-
-            return (
-              <li
-                key={todo.id}
-                className={[
-                  todo.done ? "done" : "",
-                  overdue ? "overdue" : "",
-                  today && !todo.done ? "due-today" : "",
-                  `priority-${todo.priority}`,
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              >
-                <IconButton
-                  variant="checkbox"
-                  onClick={() => handleToggle(todo)}
-                  aria-label={`${todo.title} als erledigt markieren`}
-                >
-                  {todo.done && <CheckIcon />}
-                </IconButton>
-
-                {editingId === todo.id ? (
-                  <div className="edit-row">
-                    <InlineEditInput
-                      value={editingTitle}
-                      autoFocus
-                      onValueChange={setEditingTitle}
-                      onCommit={() => commitEdit(todo.id)}
-                      onCancel={() => setEditingId(null)}
-                    />
-                    <input
-                      type="date"
-                      className="edit-date-input"
-                      value={editingDueDate}
-                      onChange={(e) => setEditingDueDate(e.currentTarget.value)}
-                      onBlur={() => commitEdit(todo.id)}
-                    />
-                  </div>
-                ) : (
-                  <span className="title" onDoubleClick={() => startEdit(todo)}>
-                    {todo.title}
-                  </span>
-                )}
-
-                {editingId !== todo.id && todo.due_date && (
-                  <DueDateBadge overdue={overdue} today={today && !todo.done}>
-                    {formatDate(todo.due_date)}
-                  </DueDateBadge>
-                )}
-
-                {editingId !== todo.id && (
-                  <PrioritySelect
-                    variant="inline"
-                    value={todo.priority}
-                    onValueChange={(priority) => handlePriorityChange(todo.id, priority)}
-                    aria-label="Priorität ändern"
-                  />
-                )}
-
-                {todo.category_name && (
-                  <CategoryBadge color={todo.category_color}>{todo.category_name}</CategoryBadge>
-                )}
-
-                <CategorySelect
-                  className="todo-select"
-                  categories={categories}
-                  value={todo.category_id}
-                  onValueChange={(categoryId) => handleUpdateTodoCategory(todo.id, categoryId)}
-                  placeholderLabel="—"
-                  aria-label="Kategorie auswählen"
-                />
-
-                <div className="todo-actions">
-                  <IconButton variant="action" onClick={() => startEdit(todo)} aria-label="Bearbeiten">
-                    <PencilIcon />
-                  </IconButton>
-                  <IconButton
-                    variant="action"
-                    danger
-                    onClick={() => handleDelete(todo.id)}
-                    aria-label="Löschen"
+              <div className="filter-row">
+                {(Object.keys(filterLabels) as DueDateFilter[]).map((key) => (
+                  <FilterChip
+                    key={key}
+                    active={dueDateFilter === key}
+                    onClick={() => setDueDateFilter(key)}
                   >
-                    <TrashIcon />
-                  </IconButton>
+                    {filterLabels[key]}
+                  </FilterChip>
+                ))}
+                <div className="status-filter">
+                  <FilterChip variant="segment" active={statusFilter === "all"} onClick={() => setStatusFilter("all")}>
+                    Alle
+                  </FilterChip>
+                  <FilterChip variant="segment" active={statusFilter === "open"} onClick={() => setStatusFilter("open")}>
+                    Offen
+                  </FilterChip>
+                  <FilterChip variant="segment" active={statusFilter === "done"} onClick={() => setStatusFilter("done")}>
+                    Erledigt
+                  </FilterChip>
                 </div>
+              </div>
+              <div className="filter-row">
+                <input
+                  type="text"
+                  className="search-input"
+                  placeholder="Suche..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.currentTarget.value)}
+                />
+                <CategorySelect
+                  className="filter-select"
+                  categories={categories}
+                  value={categoryFilter}
+                  onValueChange={setCategoryFilter}
+                  placeholderLabel="Alle Kategorien"
+                />
+                <IconButton
+                  variant="icon"
+                  onClick={() => setShowCategoryManager(true)}
+                  aria-label="Kategorien verwalten"
+                >
+                  <TagIcon />
+                  Kategorien
+                </IconButton>
+              </div>
+            </div>
 
-                {burstId === todo.id && (
-                  <span className="done-flash" aria-hidden="true">
-                    <CheckIcon />
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+            {hasActiveFilter && (
+              <div className="active-filters">
+                <span className="filter-label">
+                  {filterLabels[dueDateFilter]}
+                  {statusFilter !== "all"
+                    ? ` • ${statusFilter === "open" ? "Offen" : "Erledigt"}`
+                    : ""}
+                  {categoryFilter !== null
+                    ? ` • ${categories.find((c) => c.id === categoryFilter)?.name || "Kategorie"}`
+                    : ""}
+                  {searchQuery ? ` • Suche: "${searchQuery}"` : ""}
+                </span>
+                <button
+                  type="button"
+                  className="clear-filters"
+                  onClick={clearFilters}
+                >
+                  Zurücksetzen
+                </button>
+              </div>
+            )}
+            {error && <p className="error">Fehler: {error}</p>}
+            {loading && <p className="muted">Lade Aufgaben …</p>}
 
-        {!loading && todos.length > 0 && (
-          <p className="footer">
-            {hasActiveFilter
-              ? `${filteredTodos.length} von ${todos.length} Aufgabe(n) angezeigt`
-              : remaining === 0
-                ? "Alles erledigt!"
-                : `${remaining} von ${todos.length} Aufgabe(n) offen`}
-          </p>
-        )}
+            {!loading && todos.length === 0 && !error && (
+              <p className="muted">Noch keine Aufgaben. Lege deine erste an — Titel eintippen, Enter drücken.</p>
+            )}
+
+            {!loading && hasActiveFilter && filteredTodos.length === 0 && (
+              <p className="muted">Keine Aufgaben gefunden. Setz den Filter auf „Alle" zurück.</p>
+            )}
+
+            <ul className="todo-list">
+              {filteredTodos.map((todo) => {
+                const overdue = !todo.done && isOverdue(todo.due_date);
+                const today = isDueToday(todo.due_date);
+
+                return (
+                  <li
+                    key={todo.id}
+                    className={[
+                      todo.done ? "done" : "",
+                      overdue ? "overdue" : "",
+                      today && !todo.done ? "due-today" : "",
+                      `priority-${todo.priority}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    <IconButton
+                      variant="checkbox"
+                      onClick={() => handleToggle(todo)}
+                      aria-label={`${todo.title} als erledigt markieren`}
+                    >
+                      {todo.done && <CheckIcon />}
+                    </IconButton>
+
+                    {editingId === todo.id ? (
+                      <div className="edit-row">
+                        <InlineEditInput
+                          value={editingTitle}
+                          autoFocus
+                          onValueChange={setEditingTitle}
+                          onCommit={() => commitEdit(todo.id)}
+                          onCancel={() => setEditingId(null)}
+                        />
+                        <input
+                          type="date"
+                          className="edit-date-input"
+                          value={editingDueDate}
+                          onChange={(e) => setEditingDueDate(e.currentTarget.value)}
+                          onBlur={() => commitEdit(todo.id)}
+                        />
+                      </div>
+                    ) : (
+                      <span className="title" onDoubleClick={() => startEdit(todo)}>
+                        {todo.title}
+                      </span>
+                    )}
+
+                    {editingId !== todo.id && todo.due_date && (
+                      <DueDateBadge overdue={overdue} today={today && !todo.done}>
+                        {formatDate(todo.due_date)}
+                      </DueDateBadge>
+                    )}
+
+                    {editingId !== todo.id && (
+                      <PrioritySelect
+                        variant="inline"
+                        value={todo.priority}
+                        onValueChange={(priority) => handlePriorityChange(todo.id, priority)}
+                        aria-label="Priorität ändern"
+                      />
+                    )}
+
+                    {todo.category_name && (
+                      <CategoryBadge color={todo.category_color}>{todo.category_name}</CategoryBadge>
+                    )}
+
+                    <CategorySelect
+                      className="todo-select"
+                      categories={categories}
+                      value={todo.category_id}
+                      onValueChange={(categoryId) => handleUpdateTodoCategory(todo.id, categoryId)}
+                      placeholderLabel="—"
+                      aria-label="Kategorie auswählen"
+                    />
+
+                    <div className="todo-actions">
+                      <IconButton variant="action" onClick={() => startEdit(todo)} aria-label="Bearbeiten">
+                        <PencilIcon />
+                      </IconButton>
+                      <IconButton
+                        variant="action"
+                        danger
+                        onClick={() => handleDelete(todo.id)}
+                        aria-label="Löschen"
+                      >
+                        <TrashIcon />
+                      </IconButton>
+                    </div>
+
+                    {burstId === todo.id && (
+                      <span className="done-flash" aria-hidden="true">
+                        <CheckIcon />
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+
+            {!loading && todos.length > 0 && (
+              <p className="footer">
+                {hasActiveFilter
+                  ? `${filteredTodos.length} von ${todos.length} Aufgabe(n) angezeigt`
+                  : remaining === 0
+                    ? "Alles erledigt!"
+                    : `${remaining} von ${todos.length} Aufgabe(n) offen`}
+              </p>
+            )}
           </>
         )}
 
@@ -754,25 +500,25 @@ function App() {
                           </div>
 
                           <div className="kanban-card-actions">
-                              <IconButton
-                                variant="kanban"
-                                onDragStart={handleChildDragStart}
-                                onClick={() => handleToggle(todo)}
-                                aria-label={`${todo.title} Status ändern`}
-                                title={todo.status === "done" ? "Zurück zu \"Zu tun\"" : "Als erledigt markieren"}
-                              >
-                                {todo.status === "done" ? <ChevronLeftIcon /> : <CheckIcon />}
-                              </IconButton>
-                              <IconButton
-                                variant="kanban"
-                                danger
-                                onDragStart={handleChildDragStart}
-                                onClick={() => handleDelete(todo.id)}
-                                aria-label="Löschen"
-                              >
-                                <TrashIcon />
-                              </IconButton>
-                            </div>
+                            <IconButton
+                              variant="kanban"
+                              onDragStart={handleChildDragStart}
+                              onClick={() => handleToggle(todo)}
+                              aria-label={`${todo.title} Status ändern`}
+                              title={todo.status === "done" ? 'Zurück zu "Zu tun"' : "Als erledigt markieren"}
+                            >
+                              {todo.status === "done" ? <ChevronLeftIcon /> : <CheckIcon />}
+                            </IconButton>
+                            <IconButton
+                              variant="kanban"
+                              danger
+                              onDragStart={handleChildDragStart}
+                              onClick={() => handleDelete(todo.id)}
+                              aria-label="Löschen"
+                            >
+                              <TrashIcon />
+                            </IconButton>
+                          </div>
                         </div>
                       );
                     })}
@@ -793,7 +539,7 @@ function App() {
           <button
             type="button"
             className="update-btn"
-            onClick={() => setCheckUpdate(true)}
+            onClick={triggerCheckUpdate}
             disabled={checkingUpdate}
             aria-label="Nach Updates suchen"
           >
@@ -822,21 +568,21 @@ function App() {
       {/* Changelog Modal */}
       {showChangelog && (
         <Modal variant="changelog" title="Changelog" onClose={closeChangelog} closeLabel="Schließen">
-            <div className="changelog-body">
-              {CHANGELOG.map((entry) => (
-                <div key={entry.version} className="changelog-entry">
-                  <div className="changelog-version">
-                    <span className="version-badge">{entry.version}</span>
-                    <span className="version-date">{entry.date}</span>
-                  </div>
-                  <ul>
-                    {entry.changes.map((change, i) => (
-                      <li key={i}>{change}</li>
-                    ))}
-                  </ul>
+          <div className="changelog-body">
+            {CHANGELOG.map((entry) => (
+              <div key={entry.version} className="changelog-entry">
+                <div className="changelog-version">
+                  <span className="version-badge">{entry.version}</span>
+                  <span className="version-date">{entry.date}</span>
                 </div>
-              ))}
-            </div>
+                <ul>
+                  {entry.changes.map((change, i) => (
+                    <li key={i}>{change}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
         </Modal>
       )}
 
@@ -876,80 +622,79 @@ function App() {
       {/* Category Manager Modal */}
       {showCategoryManager && (
         <Modal variant="category" title="Kategorien" onClose={closeCategoryManager} closeLabel="Schließen">
+          <form className="add-category-form" onSubmit={handleAddCategory}>
+            <input
+              type="text"
+              placeholder="Neue Kategorie..."
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.currentTarget.value)}
+            />
+            <ColorPicker
+              value={newCategoryColor}
+              onSelect={setNewCategoryColor}
+              swatchLabel={(color) => `Farbe ${color} auswählen`}
+            />
+            <button type="submit">Hinzufügen</button>
+          </form>
 
-            <form className="add-category-form" onSubmit={handleAddCategory}>
-              <input
-                type="text"
-                placeholder="Neue Kategorie..."
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.currentTarget.value)}
-              />
-              <ColorPicker
-                value={newCategoryColor}
-                onSelect={setNewCategoryColor}
-                swatchLabel={(color) => `Farbe ${color} auswählen`}
-              />
-              <button type="submit">Hinzufügen</button>
-            </form>
+          <ul className="category-list">
+            {categories.map((cat) => (
+              <li key={cat.id} className="category-item">
+                {editingCategoryId === cat.id ? (
+                  <>
+                    <InlineEditInput
+                      value={editingCategoryName}
+                      onValueChange={setEditingCategoryName}
+                      onCommit={() => commitEditCategory(cat.id)}
+                      onCancel={() => closeCategoryManager()}
+                    />
+                    <ColorPicker
+                      inline
+                      value={editingCategoryColor}
+                      onSelect={setEditingCategoryColor}
+                      swatchLabel={(color) => `Farbe ${color} auswählen`}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <span
+                      className="category-color-dot"
+                      style={{ backgroundColor: cat.color }}
+                    />
+                    <span className="category-name">{cat.name}</span>
+                  </>
+                )}
 
-            <ul className="category-list">
-              {categories.map((cat) => (
-                <li key={cat.id} className="category-item">
+                <div className="category-actions">
                   {editingCategoryId === cat.id ? (
-                    <>
-                      <InlineEditInput
-                        value={editingCategoryName}
-                        onValueChange={setEditingCategoryName}
-                        onCommit={() => commitEditCategory(cat.id)}
-                        onCancel={() => setEditingCategoryId(null)}
-                      />
-                      <ColorPicker
-                        inline
-                        value={editingCategoryColor}
-                        onSelect={setEditingCategoryColor}
-                        swatchLabel={(color) => `Farbe ${color} auswählen`}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <span
-                        className="category-color-dot"
-                        style={{ backgroundColor: cat.color }}
-                      />
-                      <span className="category-name">{cat.name}</span>
-                    </>
-                  )}
-
-                  <div className="category-actions">
-                    {editingCategoryId === cat.id ? (
-                      <IconButton
-                        variant="icon"
-                        onClick={() => commitEditCategory(cat.id)}
-                        aria-label="Speichern"
-                      >
-                        <CheckIcon />
-                      </IconButton>
-                    ) : (
-                      <IconButton
-                        variant="icon"
-                        onClick={() => startEditCategory(cat)}
-                        aria-label="Bearbeiten"
-                      >
-                        <PencilIcon />
-                      </IconButton>
-                    )}
                     <IconButton
                       variant="icon"
-                      danger
-                      onClick={() => handleDeleteCategory(cat.id)}
-                      aria-label="Löschen"
+                      onClick={() => commitEditCategory(cat.id)}
+                      aria-label="Speichern"
                     >
-                      <TrashIcon />
+                      <CheckIcon />
                     </IconButton>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  ) : (
+                    <IconButton
+                      variant="icon"
+                      onClick={() => startEditCategory(cat)}
+                      aria-label="Bearbeiten"
+                    >
+                      <PencilIcon />
+                    </IconButton>
+                  )}
+                  <IconButton
+                    variant="icon"
+                    danger
+                    onClick={() => handleDeleteCategory(cat.id)}
+                    aria-label="Löschen"
+                  >
+                    <TrashIcon />
+                  </IconButton>
+                </div>
+              </li>
+            ))}
+          </ul>
         </Modal>
       )}
 
